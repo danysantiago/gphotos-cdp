@@ -24,7 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -110,7 +110,7 @@ type Session struct {
 // getLastDone returns the URL of the most recent item that was downloaded in
 // the previous run. If any, it should have been stored in dlDir/.lastdone
 func getLastDone(dlDir string) (string, error) {
-	data, err := ioutil.ReadFile(filepath.Join(dlDir, ".lastdone"))
+	data, err := os.ReadFile(filepath.Join(dlDir, ".lastdone"))
 	if os.IsNotExist(err) {
 		return "", nil
 	}
@@ -129,7 +129,7 @@ func NewSession() (*Session, error) {
 		}
 	} else {
 		var err error
-		dir, err = ioutil.TempDir("", "gphotos-cdp")
+		dir, err = os.MkdirTemp("", "gphotos-cdp")
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +189,7 @@ func (s *Session) cleanDlDir() error {
 	if s.dlDir == "" {
 		return nil
 	}
-	entries, err := ioutil.ReadDir(s.dlDir)
+	entries, err := os.ReadDir(s.dlDir)
 	if err != nil {
 		return err
 	}
@@ -472,7 +472,7 @@ func markDone(dldir, location string) error {
 			return err
 		}
 	}
-	if err := ioutil.WriteFile(oldPath, []byte(location), 0600); err != nil {
+	if err := os.WriteFile(oldPath, []byte(location), 0600); err != nil {
 		// restore from backup
 		if err := os.Rename(newPath, oldPath); err != nil {
 			if !os.IsNotExist(err) {
@@ -539,11 +539,11 @@ func (s *Session) download(ctx context.Context, location string) (string, error)
 			return "", fmt.Errorf("hit deadline while downloading in %q", s.dlDir)
 		}
 
-		entries, err := ioutil.ReadDir(s.dlDir)
+		entries, err := os.ReadDir(s.dlDir)
 		if err != nil {
 			return "", err
 		}
-		var fileEntries []os.FileInfo
+		var dirEntries []fs.DirEntry
 		for _, v := range entries {
 			if v.IsDir() {
 				continue
@@ -554,29 +554,43 @@ func (s *Session) download(ctx context.Context, location string) (string, error)
 			if v.Name() == ".lastdone.bak" {
 				continue
 			}
-			fileEntries = append(fileEntries, v)
+			dirEntries = append(dirEntries, v)
 		}
-		if len(fileEntries) < 1 {
+		dirEntriesLen := len(dirEntries)
+		if dirEntriesLen < 1 {
 			continue
 		}
-		if len(fileEntries) > 1 {
-			return "", fmt.Errorf("more than one file (%d) in download dir %q", len(fileEntries), s.dlDir)
+		if dirEntriesLen > 1 {
+			// download is probably done but temp file .crdownload is still in file system, delay
+			// until it is cleaned up
+			if dirEntriesLen == 2 {
+				firstName, _ := strings.CutSuffix(dirEntries[0].Name(), ".crdownload")
+				secondName, _ := strings.CutSuffix(dirEntries[1].Name(), ".crdownload")
+				if strings.Compare(firstName, secondName) == 0 {
+					continue
+				}
+			}
+			return "", fmt.Errorf("more than one file (%d) in download dir %q", dirEntriesLen, s.dlDir)
 		}
 		if !started {
-			if len(fileEntries) > 0 {
+			if dirEntriesLen > 0 {
 				started = true
 				deadline = time.Now().Add(time.Minute)
 			}
 		}
-		newFileSize := fileEntries[0].Size()
+		fileInfo, err := dirEntries[0].Info()
+		if err != nil {
+			return "", err
+		}
+		newFileSize := fileInfo.Size()
 		if newFileSize > fileSize {
 			// push back the timeout as long as we make progress
 			deadline = time.Now().Add(time.Minute)
 			fileSize = newFileSize
 		}
-		if !strings.HasSuffix(fileEntries[0].Name(), ".crdownload") {
+		if !strings.HasSuffix(dirEntries[0].Name(), ".crdownload") {
 			// download is over
-			filename = fileEntries[0].Name()
+			filename = dirEntries[0].Name()
 			break
 		}
 	}
