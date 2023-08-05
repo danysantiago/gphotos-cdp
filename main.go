@@ -614,9 +614,15 @@ func (s *Session) moveDownload(ctx context.Context, dlFile, location string) (st
 	if err := os.MkdirAll(newDir, 0700); err != nil {
 		return "", err
 	}
+	oldFile := filepath.Join(s.dlDir, dlFile)
 	newFile := filepath.Join(newDir, dlFile)
-	if err := os.Rename(filepath.Join(s.dlDir, dlFile), newFile); err != nil {
+	if err := os.Rename(oldFile, newFile); err != nil {
 		return "", err
+	}
+	if _, err := os.Stat(oldFile); err == nil {
+		// old file exists, os.Rename is not atomic on some non-Unix platforms,
+		// lets sleep a bit to let it sink
+		time.Sleep(tick)
 	}
 	return newFile, nil
 }
