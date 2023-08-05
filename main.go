@@ -156,8 +156,13 @@ func NewSession() (*Session, error) {
 func (s *Session) NewContext() (context.Context, context.CancelFunc) {
 	// Let's use as a base for allocator options (It implies Headless)
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
 		chromedp.DisableGPU,
 		chromedp.UserDataDir(s.profileDir),
+		chromedp.Flag("enable-automation", true),
+		chromedp.Flag("disable-web-security", true),
+		chromedp.Flag("allow-running-insecure-content", true),
 	)
 
 	if !*headlessFlag {
@@ -346,7 +351,11 @@ func (s *Session) setFirstItem(ctx context.Context) error {
 func navToEnd(ctx context.Context) error {
 	// try jumping to the end of the page. detect we are there and have stopped
 	// moving when two consecutive screenshots are identical.
+	// a minimum floor of duplicate screenshots is used to overcome any
+	// any false positives in determining the end of some larger libraries
 	var previousScr, scr []byte
+	minAmountOfDuplicateScr := 3
+	amountOfDuplicateScr := 0
 	for {
 		chromedp.KeyEvent(kb.PageDown).Do(ctx)
 		chromedp.KeyEvent(kb.End).Do(ctx)
@@ -356,10 +365,18 @@ func navToEnd(ctx context.Context) error {
 			continue
 		}
 		if bytes.Equal(previousScr, scr) {
-			break
+			amountOfDuplicateScr++
+			if *verboseFlag {
+				log.Printf("Screen is equal to previous screen, waiting to hit threshold [%v/%v]", amountOfDuplicateScr, minAmountOfDuplicateScr)
+			}
+			if amountOfDuplicateScr == minAmountOfDuplicateScr {
+				break
+			}
+		} else {
+			amountOfDuplicateScr = 0
 		}
 		previousScr = scr
-		time.Sleep(tick)
+		time.Sleep(10 * tick)
 	}
 
 	if *verboseFlag {
@@ -417,6 +434,9 @@ func doRun(filePath string) error {
 
 // navLeft navigates to the next item to the left
 func navLeft(ctx context.Context) error {
+	var res []string
+	chromedp.EvaluateAsDevTools(`window.resize();`, &res)
+	time.Sleep(tick)
 	muNavWaiting.Lock()
 	listenEvents = true
 	muNavWaiting.Unlock()
