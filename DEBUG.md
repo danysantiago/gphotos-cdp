@@ -1,4 +1,4 @@
-For running and debugging in Windows we need to auth in the installed Chrome using the `tmp/gphotos-cdp` as data dir to be pciked up by Chromium.
+For running and debugging in Windows we need to auth in the installed Chrome using the `tmp/gphotos-cdp` as data dir to be picked up by Chromium (chromedp).
 
 * In PowerShell run:
 ```

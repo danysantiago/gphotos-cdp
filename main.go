@@ -580,6 +580,11 @@ func (s *Session) download(ctx context.Context, location string) (string, error)
 		}
 		fileInfo, err := dirEntries[0].Info()
 		if err != nil {
+			// download finished between the time directory entries was queried and now where we
+			// want to check file, delay and try reading directory again
+			if os.IsNotExist(err) && strings.HasSuffix(dirEntries[0].Name(), ".crdownload") {
+				continue
+			}
 			return "", err
 		}
 		newFileSize := fileInfo.Size()
